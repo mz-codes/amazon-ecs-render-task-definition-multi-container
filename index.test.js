@@ -71,7 +71,7 @@ describe('Render task definition', () => {
             postfix: '.json',
             keep: true,
             discardDescriptor: true
-          });
+        });
         expect(fs.writeFileSync).toHaveBeenNthCalledWith(1, 'new-task-def-file-name',
             JSON.stringify({
                 family: 'task-def-family',
@@ -129,7 +129,7 @@ describe('Render task definition', () => {
             postfix: '.json',
             keep: true,
             discardDescriptor: true
-          });
+        });
         expect(fs.writeFileSync).toHaveBeenNthCalledWith(1, 'new-task-def-file-name',
             JSON.stringify({
                 family: 'task-def-family',
@@ -150,16 +150,65 @@ describe('Render task definition', () => {
         expect(core.setOutput).toHaveBeenNthCalledWith(1, 'task-definition', 'new-task-def-file-name');
     });
 
-    test('error returned if container-name input is not well formated', async () => {
+    test('renders logConfiguration on the task definition', async () => {
         core.getInput = jest
             .fn()
-            .mockReturnValueOnce('/hello/task-definition.json')
-            .mockReturnValueOnce('web,')
-            .mockReturnValueOnce('nginx:latest');
+            .mockReturnValueOnce('task-definition.json')
+            .mockReturnValueOnce('web')
+            .mockReturnValueOnce('nginx:latest')
+            .mockReturnValueOnce('FOO=bar\nHELLO=world')
+            .mockReturnValueOnce('awslogs')
+            .mockReturnValueOnce(`awslogs-create-group=true\nawslogs-group=/ecs/web\nawslogs-region=us-east-1\nawslogs-stream-prefix=ecs`);
 
-        await run();
+        await run()
 
-        expect(core.setFailed).toBeCalledWith('Invalid format for container name. Please use a single value or comma separated values');
+        expect(tmp.fileSync).toHaveBeenNthCalledWith(1, {
+            tmpdir: '/home/runner/work/_temp',
+            prefix: 'task-definition-',
+            postfix: '.json',
+            keep: true,
+            discardDescriptor: true
+        });
+
+
+        expect(fs.writeFileSync).toHaveBeenNthCalledWith(1, 'new-task-def-file-name',
+            JSON.stringify({
+                family: 'task-def-family',
+                containerDefinitions: [
+                    {
+                        name: "web",
+                        image: "nginx:latest",
+                        environment: [
+                            {
+                                name: "FOO",
+                                value: "bar"
+                            },
+                            {
+                                name: "DONT-TOUCH",
+                                value: "me"
+                            },
+                            {
+                                name: "HELLO",
+                                value: "world"
+                            }
+                        ],
+                        logConfiguration: {
+                            logDriver: "awslogs",
+                            options: {
+                                "awslogs-create-group": "true",
+                                "awslogs-group": "/ecs/web",
+                                "awslogs-region": "us-east-1",
+                                "awslogs-stream-prefix": "ecs"
+                            }
+                        }
+                    },
+                    {
+                        name: "sidecar",
+                        image: "hello"
+                    }
+                ]
+            }, null, 2)
+        );
     });
 
     test('error returned for missing task definition file', async () => {
@@ -173,6 +222,117 @@ describe('Render task definition', () => {
         await run();
 
         expect(core.setFailed).toBeCalledWith('Task definition file does not exist: does-not-exist-task-definition.json');
+    });
+
+    test('error returned if container-name input is not well formated', async () => {
+        core.getInput = jest
+            .fn()
+            .mockReturnValueOnce('/hello/task-definition.json')
+            .mockReturnValueOnce('web,')
+            .mockReturnValueOnce('nginx:latest');
+
+        await run();
+
+        expect(core.setFailed).toBeCalledWith('Invalid format for container name. Please use a single value or comma separated values');
+    });
+
+    test('renders a task definition with docker labels', async () => {
+        core.getInput = jest
+            .fn()
+            .mockReturnValueOnce('task-definition.json')
+            .mockReturnValueOnce('web')
+            .mockReturnValueOnce('nginx:latest')
+            .mockReturnValueOnce('EXAMPLE=here')
+            .mockReturnValueOnce('awslogs')
+            .mockReturnValueOnce('awslogs-create-group=true\nawslogs-group=/ecs/web\nawslogs-region=us-east-1\nawslogs-stream-prefix=ecs')
+            .mockReturnValueOnce('key1=value1\nkey2=value2');
+
+        await run();
+
+        expect(tmp.fileSync).toHaveBeenNthCalledWith(1, {
+            tmpdir: '/home/runner/work/_temp',
+            prefix: 'task-definition-',
+            postfix: '.json',
+            keep: true,
+            discardDescriptor: true
+        });
+
+        expect(fs.writeFileSync).toHaveBeenNthCalledWith(1, 'new-task-def-file-name',
+            JSON.stringify({
+                family: 'task-def-family',
+                containerDefinitions: [
+                    {
+                        name: "web",
+                        image: "nginx:latest",
+                        environment: [
+                            {
+                                name: "FOO",
+                                value: "bar"
+                            },
+                            {
+                                name: "DONT-TOUCH",
+                                value: "me"
+                            },
+                            {
+                                name: "HELLO",
+                                value: "world"
+                            },
+                            {
+                                name: "EXAMPLE",
+                                value: "here"
+                            }
+                        ],
+                        logConfiguration: {
+                            logDriver: "awslogs",
+                            options: {
+                                "awslogs-create-group": "true",
+                                "awslogs-group": "/ecs/web",
+                                "awslogs-region": "us-east-1",
+                                "awslogs-stream-prefix": "ecs"
+                            }
+                        },
+                        dockerLabels: {
+                            "key1": "value1",
+                            "key2": "value2"
+                        }
+                    },
+                    {
+                        name: "sidecar",
+                        image: "hello"
+                    }
+                ]
+            }, null, 2)
+        );
+    });
+
+    test('renders a task definition at an absolute path with bad docker labels', async () => {
+        core.getInput = jest
+            .fn()
+            .mockReturnValueOnce('/hello/task-definition.json')
+            .mockReturnValueOnce('web')
+            .mockReturnValueOnce('nginx:latest')
+            .mockReturnValueOnce('EXAMPLE=here')
+            .mockReturnValueOnce('awslogs')
+            .mockReturnValueOnce('awslogs-create-group=true\nawslogs-group=/ecs/web\nawslogs-region=us-east-1\nawslogs-stream-prefix=ecs')
+            .mockReturnValueOnce('key1=update_value1\nkey2\nkey3=value3');
+
+        jest.mock('/hello/task-definition.json', () => ({
+            family: 'task-def-family',
+            containerDefinitions: [
+                {
+                    name: "web",
+                    image: "some-other-image",
+                    dockerLabels: {
+                        "key1": "value1",
+                        "key2": "value2"
+                    }
+                }
+            ]
+        }), { virtual: true });
+
+        await run();
+
+        expect(core.setFailed).toBeCalledWith('Can\'t parse logConfiguration option key2. Must be in key=value format, one per line');
     });
 
     test('error returned for non-JSON task definition contents', async () => {
